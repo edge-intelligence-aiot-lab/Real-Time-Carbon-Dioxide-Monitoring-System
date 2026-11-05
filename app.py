@@ -12,6 +12,21 @@ from flask import Flask, jsonify, render_template, request
 load_dotenv(Path(__file__).with_name(".env"))
 app = Flask(__name__)
 
+# Units are included in the field names. Only inlet CO2 is required.
+READING_LIMITS = {
+    "co2_ppm": (0, None),
+    "outlet_co2_ppm": (0, None),
+    "inlet_temperature_c": (-273.15, None),
+    "outlet_temperature_c": (-273.15, None),
+    "inlet_humidity_rh": (0, 100),
+    "outlet_humidity_rh": (0, 100),
+    "inlet_particulate_ug_m3": (0, None),
+    "outlet_particulate_ug_m3": (0, None),
+    "mass_g": (0, None),
+}
+READING_COLUMNS = ", ".join(READING_LIMITS)
+
+
 
 def connect_database():
     return mysql.connector.connect(
@@ -27,8 +42,7 @@ def connect_database():
 def format_reading(row):
     return {
         "time": row["recorded_at"].replace(tzinfo=timezone.utc).isoformat(timespec="seconds"),
-        "co2_ppm": row["co2_ppm"],
-        "outlet_co2_ppm": row["outlet_co2_ppm"],
+        **{field: row[field] for field in READING_LIMITS},
     }
 
 
@@ -47,7 +61,7 @@ def home():
 def latest_reading():
     with closing(connect_database()) as connection:
         with closing(connection.cursor(dictionary=True)) as cursor:
-            cursor.execute("SELECT co2_ppm, outlet_co2_ppm, recorded_at FROM readings ORDER BY id DESC LIMIT 1")
+            cursor.execute(f"SELECT {READING_COLUMNS}, recorded_at FROM readings ORDER BY id DESC LIMIT 1")
             row = cursor.fetchone()
     if row is None:
         return jsonify(error="No readings received yet."), 404
@@ -58,7 +72,7 @@ def latest_reading():
 def readings():
     with closing(connect_database()) as connection:
         with closing(connection.cursor(dictionary=True)) as cursor:
-            cursor.execute("SELECT co2_ppm, outlet_co2_ppm, recorded_at FROM readings ORDER BY id DESC LIMIT 1000")
+            cursor.execute(f"SELECT {READING_COLUMNS}, recorded_at FROM readings ORDER BY id DESC LIMIT 1000")
             rows = cursor.fetchall()
     return jsonify([format_reading(row) for row in reversed(rows)])
 
@@ -69,31 +83,29 @@ def receive_reading():
     if not isinstance(payload, dict):
         return jsonify(error="Send a JSON object containing co2_ppm."), 400
 
-    for field in ("co2_ppm", "outlet_co2_ppm"):
+    for field, (minimum, maximum) in READING_LIMITS.items():
         value = payload.get(field)
-        if field == "outlet_co2_ppm" and value is None:
+        if field != "co2_ppm" and value is None:
             continue
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return jsonify(error=f"{field} must be a number."), 400
         try:
-            valid = math.isfinite(value) and value >= 0
+            valid = math.isfinite(value) and value >= minimum
+            if maximum is not None:
+                valid = valid and value <= maximum
         except OverflowError:
             valid = False
         if not valid:
-            return jsonify(error=f"{field} must be finite and nonnegative."), 400
+            return jsonify(error=f"{field} must be finite and within its valid range ({minimum} to {maximum if maximum is not None else 'no upper limit'})."), 400
 
-    co2_ppm = payload["co2_ppm"]
-    outlet_co2_ppm = payload.get("outlet_co2_ppm")
-    recorded_at = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+    reading = {field: payload.get(field) for field in READING_LIMITS}
+    reading["recorded_at"] = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+    placeholders = ", ".join(["%s"] * len(reading))
     with closing(connect_database()) as connection:
         with closing(connection.cursor()) as cursor:
             cursor.execute(
-                "INSERT INTO readings (co2_ppm, outlet_co2_ppm, recorded_at) VALUES (%s, %s, %s)",
-                (co2_ppm, outlet_co2_ppm, recorded_at),
+                f"INSERT INTO readings ({READING_COLUMNS}, recorded_at) VALUES ({placeholders})",
+                tuple(reading.values()),
             )
         connection.commit()
-    return jsonify(format_reading({
-        "co2_ppm": co2_ppm,
-        "outlet_co2_ppm": outlet_co2_ppm,
-        "recorded_at": recorded_at,
-    })), 201
+    return jsonify(format_reading(reading)), 201

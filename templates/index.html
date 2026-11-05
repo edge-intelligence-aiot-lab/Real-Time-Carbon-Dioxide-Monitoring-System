@@ -99,15 +99,15 @@
         <h2>Inlet Measurements</h2>
         <dl class="tiles">
           {{ tile('CO₂', 'ppm', value_id='inlet-co2') }}
-          {{ tile('Temperature', '°C', half=true) }}
-          {{ tile('Humidity', '%RH', half=true) }}
-          {{ tile('Particulate Matter', 'µg/m³') }}
+          {{ tile('Temperature', '°C', half=true, value_id='inlet-temperature') }}
+          {{ tile('Humidity', '%RH', half=true, value_id='inlet-humidity') }}
+          {{ tile('Particulate Matter', 'µg/m³', value_id='inlet-particulate') }}
         </dl>
       </section>
       <section class="panel weight">
         <h2>Weight Sensor</h2>
         <dl class="tiles">
-          {{ tile('Mass', 'g') }}
+          {{ tile('Mass', 'g', value_id='mass') }}
           <div class="tile" id="reduction-card" data-state="unknown">
             <dt>CO₂ Reduction</dt>
             <dd aria-live="polite">
@@ -122,9 +122,9 @@
         <h2>Outlet Measurements</h2>
         <dl class="tiles">
           {{ tile('CO₂', 'ppm', value_id='outlet-co2') }}
-          {{ tile('Temperature', '°C', half=true) }}
-          {{ tile('Humidity', '%RH', half=true) }}
-          {{ tile('Particulate Matter', 'µg/m³') }}
+          {{ tile('Temperature', '°C', half=true, value_id='outlet-temperature') }}
+          {{ tile('Humidity', '%RH', half=true, value_id='outlet-humidity') }}
+          {{ tile('Particulate Matter', 'µg/m³', value_id='outlet-particulate') }}
         </dl>
       </section>
     </div>
@@ -183,6 +183,13 @@
         const reading = await getReadings("/api/readings/latest");
         document.getElementById("inlet-co2").textContent = reading.co2_ppm;
         document.getElementById("outlet-co2").textContent = reading.outlet_co2_ppm ?? "—";
+        document.getElementById("inlet-temperature").textContent = reading.inlet_temperature_c ?? "—";
+        document.getElementById("outlet-temperature").textContent = reading.outlet_temperature_c ?? "—";
+        document.getElementById("inlet-humidity").textContent = reading.inlet_humidity_rh ?? "—";
+        document.getElementById("outlet-humidity").textContent = reading.outlet_humidity_rh ?? "—";
+        document.getElementById("inlet-particulate").textContent = reading.inlet_particulate_ug_m3 ?? "—";
+        document.getElementById("outlet-particulate").textContent = reading.outlet_particulate_ug_m3 ?? "—";
+        document.getElementById("mass").textContent = reading.mass_g ?? "—";
         updateReduction(reading.co2_ppm, reading.outlet_co2_ppm);
         status.textContent = `Last sample ${new Date(reading.time).toLocaleString()}`;
       } catch {
