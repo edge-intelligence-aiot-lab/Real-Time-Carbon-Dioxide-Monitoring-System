@@ -61,6 +61,11 @@
       background: #e1e8ef;
       font-variant-numeric: tabular-nums;
     }
+    #reduction-card dd { font-size: 1.3rem; font-weight: 700; }
+    #reduction-card[data-state="red"] dd { background: #fee2e2; color: #991b1b; }
+    #reduction-card[data-state="yellow"] dd { background: #fef3c7; color: #854d0e; }
+    #reduction-card[data-state="green"] dd { background: #dcfce7; color: #166534; }
+    .reduction-note { display: block; margin-top: 6px; font-size: .75rem; }
     dl { margin: 0; }
     .trend { margin-top: 14px; }
     .plot { height: clamp(190px, 32vh, 330px); margin: 12px 16px; }
@@ -84,7 +89,7 @@
     <header>
       <h1>Real-Time Carbon Dioxide Monitoring System</h1>
       <div class="badges">
-        <span class="badge">Simulation</span>
+        <span class="badge">Test readings</span>
         <span class="badge" id="last-reading" role="status">Last sample —</span>
       </div>
     </header>
@@ -103,14 +108,20 @@
         <h2>Weight Sensor</h2>
         <dl class="tiles">
           {{ tile('Mass', 'g') }}
-          {{ tile('CO₂ Reduction', '%') }}
-          {{ tile('Concentration', '%') }}
+          <div class="tile" id="reduction-card" data-state="unknown">
+            <dt>CO₂ Reduction</dt>
+            <dd aria-live="polite">
+              <span id="co2-reduction">—</span> %
+              <small class="reduction-note" id="reduction-status">Awaiting paired readings</small>
+            </dd>
+            <small class="reduction-note">Provisional removal thresholds · Red ≤15% · Yellow >15–45% · Green >45%</small>
+          </div>
         </dl>
       </section>
       <section class="panel">
         <h2>Outlet Measurements</h2>
         <dl class="tiles">
-          {{ tile('CO₂', 'ppm') }}
+          {{ tile('CO₂', 'ppm', value_id='outlet-co2') }}
           {{ tile('Temperature', '°C', half=true) }}
           {{ tile('Humidity', '%RH', half=true) }}
           {{ tile('Particulate Matter', 'µg/m³') }}
@@ -121,7 +132,7 @@
     <section class="panel trend">
       <h2>Historical Trend Chart</h2>
       <div class="plot">
-        <canvas id="co2-chart" aria-label="Simulated inlet CO₂ trend" role="img"></canvas>
+        <canvas id="co2-chart" aria-label="Inlet and outlet CO₂ trends" role="img"></canvas>
       </div>
       <p id="chart-status" role="status"></p>
     </section>
@@ -129,11 +140,41 @@
 
   <script>
     async function getReadings(url) {
-      const response = await fetch(url);
+      const response = await fetch(url, { cache: "no-store" });
       if (!response.ok) {
         throw new Error("Readings unavailable");
       }
       return response.json();
+    }
+
+    function updateReduction(inlet, outlet) {
+      const card = document.getElementById("reduction-card");
+      const value = document.getElementById("co2-reduction");
+      const label = document.getElementById("reduction-status");
+      card.dataset.state = "unknown";
+      value.textContent = "—";
+      label.textContent = "Paired readings unavailable";
+      if (!Number.isFinite(inlet) || inlet <= 0 || !Number.isFinite(outlet) || outlet < 0) {
+        return;
+      }
+      const percentage = ((inlet - outlet) / inlet) * 100;
+      if (!Number.isFinite(percentage)) {
+        return;
+      }
+      value.textContent = percentage.toFixed(1);
+      if (percentage < 0) {
+        card.dataset.state = "red";
+        label.textContent = "Outlet above inlet";
+      } else if (percentage <= 15) {
+        card.dataset.state = "red";
+        label.textContent = "Low apparent removal";
+      } else if (percentage <= 45) {
+        card.dataset.state = "yellow";
+        label.textContent = "Moderate apparent removal";
+      } else {
+        card.dataset.state = "green";
+        label.textContent = "Higher apparent removal";
+      }
     }
 
     async function loadLatest() {
@@ -141,38 +182,61 @@
       try {
         const reading = await getReadings("/api/readings/latest");
         document.getElementById("inlet-co2").textContent = reading.co2_ppm;
-        status.textContent = `Last sample ${reading.time}`;
+        document.getElementById("outlet-co2").textContent = reading.outlet_co2_ppm ?? "—";
+        updateReduction(reading.co2_ppm, reading.outlet_co2_ppm);
+        status.textContent = `Last sample ${new Date(reading.time).toLocaleString()}`;
       } catch {
+        updateReduction(null, null);
         status.textContent = "Latest sample unavailable";
       }
     }
 
+    let co2Chart;
+
     async function loadChart() {
       try {
         const readings = await getReadings("/api/readings");
-        new Chart(document.getElementById("co2-chart"), {
+        if (co2Chart) {
+          co2Chart.data.labels = readings.map(reading => new Date(reading.time).toLocaleTimeString());
+          co2Chart.data.datasets[0].data = readings.map(reading => reading.co2_ppm);
+          co2Chart.data.datasets[1].data = readings.map(reading => reading.outlet_co2_ppm ?? null);
+          co2Chart.update("none");
+          document.getElementById("chart-status").textContent = "";
+          return;
+        }
+        co2Chart = new Chart(document.getElementById("co2-chart"), {
           type: "line",
           data: {
-            labels: readings.map(reading => reading.time),
+            labels: readings.map(reading => new Date(reading.time).toLocaleTimeString()),
             datasets: [{
               label: "Inlet CO₂ (ppm)",
               data: readings.map(reading => reading.co2_ppm),
               borderColor: "#2878ef",
               backgroundColor: "#2878ef",
               tension: 0.2
+            }, {
+              label: "Outlet CO₂ (ppm)",
+              data: readings.map(reading => reading.outlet_co2_ppm ?? null),
+              borderColor: "#a855f7",
+              backgroundColor: "#a855f7",
+              tension: 0.2,
+              spanGaps: false
             }]
           },
           options: { responsive: true, maintainAspectRatio: false }
         });
+        document.getElementById("chart-status").textContent = "";
       } catch {
         document.getElementById("chart-status").textContent = "Could not load the CO₂ chart.";
       }
     }
 
-    document.addEventListener("DOMContentLoaded", () => {
-      loadLatest();
-      loadChart();
-    });
+    async function refreshDashboard() {
+      await Promise.all([loadLatest(), loadChart()]);
+      setTimeout(refreshDashboard, 3000);
+    }
+
+    document.addEventListener("DOMContentLoaded", refreshDashboard);
   </script>
 </body>
 </html>
