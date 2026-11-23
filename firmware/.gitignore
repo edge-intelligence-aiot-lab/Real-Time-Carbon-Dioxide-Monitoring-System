@@ -1,0 +1,6 @@
+/sdkconfig
+/.vscode/
+/.idf-python/
+**/build*/
+**/sdkconfig
+/start-idf.ps1

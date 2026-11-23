@@ -1,0 +1,13 @@
+menu "Live inlet sensor settings"
+config CO2_WIFI_SSID
+    string "Wi-Fi network name"
+    default ""
+config CO2_WIFI_PASSWORD
+    string "Wi-Fi password"
+    default ""
+config CO2_SERVER_URL
+    string "Flask readings URL"
+    default ""
+    help
+        Enter http://<computer-LAN-IP>:5000/api/readings
+endmenu

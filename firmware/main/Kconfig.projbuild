@@ -1,0 +1,29 @@
+menu "CO2 monitor node"
+
+choice CO2_NODE_SIDE
+    prompt "Measurement side"
+    default CO2_NODE_INLET
+
+config CO2_NODE_INLET
+    bool "Inlet"
+
+config CO2_NODE_OUTLET
+    bool "Outlet"
+
+endchoice
+
+config CO2_WIFI_SSID
+    string "Wi-Fi network name"
+    default ""
+
+config CO2_WIFI_PASSWORD
+    string "Wi-Fi password"
+    default ""
+
+config CO2_SERVER_URL
+    string "Flask device readings URL"
+    default ""
+    help
+        Use http://<server-LAN-IP>:5000/api/device-readings for local testing.
+
+endmenu

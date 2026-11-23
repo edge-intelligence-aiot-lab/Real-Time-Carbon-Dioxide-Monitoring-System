@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 import math
 from contextlib import closing
+from threading import Lock
+from time import monotonic
 
 import mysql.connector
 from dotenv import load_dotenv
@@ -25,6 +27,10 @@ READING_LIMITS = {
     "mass_g": (0, None),
 }
 READING_COLUMNS = ", ".join(READING_LIMITS)
+
+PAIR_WINDOW_SECONDS = 15
+pending_device_readings = {}
+device_readings_lock = Lock()
 
 
 
@@ -98,6 +104,10 @@ def receive_reading():
         if not valid:
             return jsonify(error=f"{field} must be finite and within its valid range ({minimum} to {maximum if maximum is not None else 'no upper limit'})."), 400
 
+    return jsonify(save_reading(payload)), 201
+
+
+def save_reading(payload):
     reading = {field: payload.get(field) for field in READING_LIMITS}
     reading["recorded_at"] = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
     placeholders = ", ".join(["%s"] * len(reading))
@@ -108,4 +118,37 @@ def receive_reading():
                 tuple(reading.values()),
             )
         connection.commit()
-    return jsonify(format_reading(reading)), 201
+    return format_reading(reading)
+
+
+@app.post("/api/device-readings")
+def receive_device_reading():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or payload.get("side") not in ("inlet", "outlet"):
+        return jsonify(error="Send a side of inlet or outlet and a co2_ppm value."), 400
+
+    co2_ppm = payload.get("co2_ppm")
+    if isinstance(co2_ppm, bool) or not isinstance(co2_ppm, (int, float)):
+        return jsonify(error="co2_ppm must be a number."), 400
+    try:
+        valid = math.isfinite(co2_ppm) and co2_ppm >= 0
+    except OverflowError:
+        valid = False
+    if not valid:
+        return jsonify(error="co2_ppm must be finite and nonnegative."), 400
+
+    with device_readings_lock:
+        now = monotonic()
+        pending_device_readings[payload["side"]] = (now, co2_ppm)
+        for side, (received_at, _) in tuple(pending_device_readings.items()):
+            if now - received_at > PAIR_WINDOW_SECONDS:
+                del pending_device_readings[side]
+        if len(pending_device_readings) < 2:
+            return jsonify(status="waiting_for_other_side"), 202
+
+        reading = save_reading({
+            "co2_ppm": pending_device_readings["inlet"][1],
+            "outlet_co2_ppm": pending_device_readings["outlet"][1],
+        })
+        pending_device_readings.clear()
+    return jsonify(reading), 201

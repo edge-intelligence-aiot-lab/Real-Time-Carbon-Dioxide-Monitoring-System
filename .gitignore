@@ -11,3 +11,6 @@ __pycache__/
 # ESP-IDF generated files
 build/
 sdkconfig.old
+
+# Local editor settings
+.vscode/
