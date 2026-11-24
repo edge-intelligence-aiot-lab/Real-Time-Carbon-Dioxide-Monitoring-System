@@ -10,6 +10,7 @@ QueueHandle_t pms5003_samples;
 void network_task(void *argument);
 void scd41_task(void *argument);
 void pms5003_task(void *argument);
+void hx711_task(void *argument);
 
 void app_main(void)
 {
@@ -21,6 +22,8 @@ void app_main(void)
     BaseType_t result = xTaskCreate(scd41_task, "scd41", 4096, NULL, 5, NULL);
     ESP_ERROR_CHECK(result == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
     result = xTaskCreate(pms5003_task, "pms5003", 4096, NULL, 5, NULL);
+    ESP_ERROR_CHECK(result == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
+    result = xTaskCreate(hx711_task, "hx711", 3072, NULL, 5, NULL);
     ESP_ERROR_CHECK(result == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
     result = xTaskCreate(network_task, "network", 6144, NULL, 4, NULL);
     ESP_ERROR_CHECK(result == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
